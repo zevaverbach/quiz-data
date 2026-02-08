@@ -24,6 +24,8 @@ CREATE TABLE questions (
 |------|-----------|-------|
 | `sample-quiz.db` | 3 | Sample/template questions |
 | `system-design.db` | 200 | System design interview prep |
+| `beyblade-x.db` | 100 | Beyblade X trivia |
+| `greek-mythology.db` | 722 | Greek mythology trivia |
 
 ## Usage
 
