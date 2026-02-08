@@ -150,6 +150,11 @@ let sessionQuestions = []; // Questions for this session (20)
 let sessionAnswered = 0;   // How many answered this session
 let userStats = { seenQuestions: [], correctQuestions: [], totalCorrect: 0, totalAnswered: 0 };
 
+// Navigation state for back/forward browsing
+let answerHistory = [];        // Per-position: {questionIndex, selectedIndex, isCorrect, shuffledOptions, correctShuffled}
+let viewingIndex = 0;          // Which session position is currently displayed
+let browseReturnPosition = null; // null = not browsing; set to position when user clicks Back
+
 // Initialize background animation
 function createStars() {
     const bg = document.getElementById('bgAnimation');
@@ -280,6 +285,9 @@ function startGame() {
     sessionScore = 0;
     sessionAnswered = 0;
     streak = 0;
+    answerHistory = [];
+    viewingIndex = 0;
+    browseReturnPosition = null;
 
     // Select 20 questions for this session
     sessionQuestions = selectSessionQuestions();
@@ -298,6 +306,7 @@ function loadNextQuestion() {
         return;
     }
 
+    viewingIndex = sessionAnswered;
     currentQuestionIndex = sessionQuestions[sessionAnswered];
     const question = questions[currentQuestionIndex];
 
@@ -323,6 +332,7 @@ function loadNextQuestion() {
     document.getElementById('resultContainer').innerHTML = '';
     document.getElementById('nextBtn').style.display = 'none';
 
+    updateNavButtons();
     updateStats();
 }
 
@@ -371,6 +381,16 @@ function selectAnswer(selectedIndex) {
         userStats.seenQuestions.push(currentQuestionIndex);
     }
     userStats.totalAnswered++;
+
+    // Store in answer history before incrementing sessionAnswered
+    answerHistory[viewingIndex] = {
+        questionIndex: currentQuestionIndex,
+        selectedIndex: selectedIndex,
+        isCorrect: isCorrect,
+        shuffledOptions: [...currentShuffledOptions],
+        correctShuffled: currentCorrectShuffled
+    };
+
     sessionAnswered++;
 
     // Save to localStorage
@@ -393,6 +413,7 @@ function selectAnswer(selectedIndex) {
     document.getElementById('nextBtn').style.display = 'inline-block';
     document.getElementById('nextBtn').textContent = sessionAnswered < QUESTIONS_PER_GAME ? 'Next Question →' : 'View Results 🏆';
 
+    updateNavButtons();
     updateStats();
 }
 
@@ -452,8 +473,104 @@ function fireConfetti() {
     }
 }
 
+// Show a previously answered question in read-only mode
+function showReviewQuestion(position) {
+    const entry = answerHistory[position];
+    const question = questions[entry.questionIndex];
+
+    document.getElementById('questionNumber').textContent = `Question ${position + 1} of ${QUESTIONS_PER_GAME}`;
+    document.getElementById('questionText').textContent = question.question;
+
+    const optionsContainer = document.getElementById('optionsContainer');
+    optionsContainer.innerHTML = '';
+
+    entry.shuffledOptions.forEach((originalIndex, displayIndex) => {
+        const optionEl = document.createElement('div');
+        optionEl.className = 'option disabled';
+        optionEl.textContent = question.options[originalIndex];
+        if (displayIndex === entry.correctShuffled) {
+            optionEl.classList.add('correct');
+        } else if (displayIndex === entry.selectedIndex && !entry.isCorrect) {
+            optionEl.classList.add('incorrect');
+        }
+        optionsContainer.appendChild(optionEl);
+    });
+
+    // Show result and fun fact
+    const wikiLink = question.wiki ? `<a href="${question.wiki}" target="_blank" rel="noopener" class="wiki-link">📖 Learn more on Wikipedia →</a>` : '';
+    const wikiLinkSmall = question.wiki ? `<a href="${question.wiki}" target="_blank" rel="noopener" class="wiki-link-small">[wiki]</a>` : '';
+    const resultContainer = document.getElementById('resultContainer');
+    resultContainer.innerHTML = `
+        <div class="result-message ${entry.isCorrect ? 'correct' : 'incorrect'}">
+            ${entry.isCorrect ? theme.correctMessage : '❌ Incorrect! The correct answer was: ' + question.options[question.correct] + wikiLinkSmall}
+        </div>
+        <div class="fun-fact">
+            <strong>${theme.funFactLabel}</strong> ${question.funFact}
+            ${wikiLink}
+        </div>
+    `;
+
+    document.getElementById('nextBtn').style.display = 'none';
+    updateNavButtons();
+}
+
+// Navigate back to a previous question
+function goBack() {
+    if (viewingIndex <= 0) return;
+    if (browseReturnPosition === null) {
+        browseReturnPosition = viewingIndex;
+    }
+    viewingIndex--;
+    showReviewQuestion(viewingIndex);
+}
+
+// Navigate forward toward the current question
+function goForward() {
+    if (browseReturnPosition === null) return;
+    viewingIndex++;
+    if (viewingIndex >= browseReturnPosition) {
+        // Returned to where we were — exit browse mode
+        const returnPos = browseReturnPosition;
+        browseReturnPosition = null;
+        viewingIndex = returnPos;
+        // If we're at an unanswered question, load it fresh; otherwise show the answered one
+        if (viewingIndex >= sessionAnswered) {
+            loadNextQuestion();
+        } else {
+            showReviewQuestion(viewingIndex);
+            // Show Next button since this is the latest answered question
+            document.getElementById('nextBtn').style.display = 'inline-block';
+            document.getElementById('nextBtn').textContent = sessionAnswered < QUESTIONS_PER_GAME ? 'Next Question →' : 'View Results 🏆';
+            updateNavButtons();
+        }
+    } else {
+        showReviewQuestion(viewingIndex);
+    }
+}
+
+// Update visibility of back/forward/next buttons
+function updateNavButtons() {
+    const backBtn = document.getElementById('backBtn');
+    const fwdBtn = document.getElementById('fwdBtn');
+    const nextBtn = document.getElementById('nextBtn');
+
+    if (!backBtn || !fwdBtn) return;
+
+    // Back: visible when there are previous answered questions to review
+    backBtn.style.display = (viewingIndex > 0) ? 'inline-block' : 'none';
+
+    // Forward: visible only when browsing (browseReturnPosition is set) and not at the return position
+    fwdBtn.style.display = (browseReturnPosition !== null && viewingIndex < browseReturnPosition) ? 'inline-block' : 'none';
+
+    // Next: hide when browsing old questions
+    if (browseReturnPosition !== null) {
+        nextBtn.style.display = 'none';
+    }
+}
+
 // Next question
 function nextQuestion() {
+    browseReturnPosition = null;
     if (sessionAnswered >= QUESTIONS_PER_GAME) {
         showCompletionScreen();
     } else {
@@ -504,6 +621,9 @@ function resetProgress() {
         sessionScore = 0;
         sessionAnswered = 0;
         streak = 0;
+        answerHistory = [];
+        viewingIndex = 0;
+        browseReturnPosition = null;
         sessionQuestions = selectSessionQuestions();
 
         showScreen('gameScreen');
@@ -516,6 +636,9 @@ function playAgain() {
     sessionScore = 0;
     sessionAnswered = 0;
     streak = 0;
+    answerHistory = [];
+    viewingIndex = 0;
+    browseReturnPosition = null;
     sessionQuestions = selectSessionQuestions();
 
     showScreen('gameScreen');
@@ -529,6 +652,9 @@ function logout() {
     streak = 0;
     sessionQuestions = [];
     sessionAnswered = 0;
+    answerHistory = [];
+    viewingIndex = 0;
+    browseReturnPosition = null;
     userStats = { seenQuestions: [], correctQuestions: [], totalCorrect: 0, totalAnswered: 0 };
     document.getElementById('username').value = '';
     document.getElementById('streakIndicator').classList.remove('visible');
